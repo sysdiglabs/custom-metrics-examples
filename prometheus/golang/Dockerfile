@@ -1,3 +1,10 @@
+FROM golang:alpine as builder
+WORKDIR /main
+RUN apk add --no-cache git
+COPY . /main
+RUN CGO_ENABLED=0 GOOS=linux go build && ls -al /main
+
 FROM alpine:edge
-COPY main /main
+RUN apk add --no-cache ca-certificates
+COPY --from=builder /main/main /main
 CMD ["/main"]
