@@ -28,10 +28,18 @@ const summary = new client.Summary({
     percentiles: [0.01, 0.05, 0.5, 0.9, 0.95, 0.99, 0.999]
 });
 
+const requestHistogram = new client.Histogram({
+    name: "request_histogram",
+    help: "Histogram for requests",
+    labelNames: ['status_code'],
+    buckets: [0.1, 5, 15, 50, 100, 500]
+});
+
 register.registerMetric(counter);
 register.registerMetric(gauge);
 register.registerMetric(histogram);
 register.registerMetric(summary);
+register.registerMetric(requestHistogram);
 
 const rand = (low, high) => Math.random() * (high - low) + low;
 
@@ -41,7 +49,7 @@ setInterval(() => {
 
     gauge.set(rand(0, 15));
 
-    histogram.observe(rand(0,10));
+    histogram.observe(rand(0, 10));
 
     summary.observe(rand(0, 10));
 
@@ -49,12 +57,32 @@ setInterval(() => {
 }, 1000);
 
 
-
 server.get('/metrics', (req, res) => {
     res.set('Content-Type', register.contentType);
     res.end(register.metrics());
 });
 
+// Middleware
+function newObservableRequest(histogram, func) {
+    return (req, res) => {
+        let start = +new Date();
+        func(req, res);
+        let end = +new Date();
+        let elapsed = end - start;
+        let code = req.method === "GET" ? "200" : "400";
+        histogram.labels(code).observe(elapsed);
+    }
+}
+
+server.get('/', newObservableRequest(requestHistogram, (req, res) => {
+    console.log("GET");
+    res.end();
+}));
+
+server.post('/', newObservableRequest(requestHistogram, (req, res) => {
+    console.log("POST");
+    res.end();
+}));
 
 console.log('Server listening to 8080, metrics exposed on /metrics endpoint');
 server.listen(8080);

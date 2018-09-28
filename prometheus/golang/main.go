@@ -1,13 +1,14 @@
 package main
 
 import (
+	"fmt"
+	"log"
+	"math/rand"
 	"net/http"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"log"
-	"time"
-	"math/rand"
 )
 
 var (
@@ -43,7 +44,14 @@ var (
 func main() {
 	rand.Seed(time.Now().Unix())
 
-	http.Handle("/metrics", promhttp.Handler())
+	histogramVec := prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "prom_request_time",
+		Help: "Time it has taken to retrieve the metrics",
+	}, []string{"time"})
+
+	prometheus.Register(histogramVec)
+
+	http.Handle("/metrics", newHandlerWithHistogram(promhttp.Handler(), histogramVec))
 
 	prometheus.MustRegister(counter)
 	prometheus.MustRegister(gauge)
@@ -62,4 +70,23 @@ func main() {
 	}()
 
 	log.Fatal(http.ListenAndServe(":8080", nil))
+}
+
+func newHandlerWithHistogram(handler http.Handler, histogram *prometheus.HistogramVec) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		start := time.Now()
+		status := http.StatusOK
+
+		defer func() {
+			histogram.WithLabelValues(fmt.Sprintf("%d", status)).Observe(time.Since(start).Seconds())
+		}()
+
+		if req.Method == http.MethodGet {
+			handler.ServeHTTP(w, req)
+			return
+		}
+		status = http.StatusBadRequest
+
+		w.WriteHeader(status)
+	})
 }
